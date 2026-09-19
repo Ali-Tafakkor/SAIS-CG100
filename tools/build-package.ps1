@@ -20,6 +20,7 @@ $stage = Join-Path $stageParent 'SAIS-CG100-Programmer'
 New-Item -ItemType Directory -Force -Path (Join-Path $stage 'installer/hardware'),(Join-Path $stage 'installer/web'),(Join-Path $stage 'scripts'),(Join-Path $stage 'docs'),(Join-Path $stage 'runtime/python'),(Join-Path $stage 'runtime/openocd') | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'installer/Run-Programmer.cmd') -Destination (Join-Path $stage 'Run-Programmer.cmd')
 Copy-Item -Path (Join-Path $root 'installer/*.py') -Destination (Join-Path $stage 'installer')
+Copy-Item -LiteralPath (Join-Path $root 'installer/download.ps1') -Destination (Join-Path $stage 'installer')
 Copy-Item -LiteralPath (Join-Path $root 'installer/hardware/board.tcl') -Destination (Join-Path $stage 'installer/hardware')
 Copy-Item -Path (Join-Path $root 'installer/web/*') -Destination (Join-Path $stage 'installer/web')
 Copy-Item -LiteralPath (Join-Path $root 'scripts/stlink-h750.cfg') -Destination (Join-Path $stage 'scripts')

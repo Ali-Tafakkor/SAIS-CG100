@@ -20,6 +20,8 @@ The programmer uses bundled OpenOCD and libusb. If the scan finds no ST-LINK, in
 
 The initial estimated time is approximate. A complete 16 MiB NOR read over SWD is slow; two backup reads and full post-write checks can take several minutes per board. Parallel workers reduce batch wall time only when USB/host resources permit it.
 
+If **Fetch latest firmware** fails, no board has been changed. The programmer downloads the latest release manifest from `github.com`, then the binaries for that exact release tag, and verifies their lengths and SHA-256 hashes. It automatically tries Python HTTPS, Windows curl and PowerShell for connection failures. If all fail, check access to `github.com` and `release-assets.githubusercontent.com`, including any local proxy or firewall, and press **Fetch latest firmware** again. TLS certificate checks stay enabled.
+
 ## Results
 
 | Result | Meaning |

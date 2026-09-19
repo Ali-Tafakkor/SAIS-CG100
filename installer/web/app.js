@@ -2,13 +2,14 @@ let token = "";
 let current = null;
 const selected = new Set();
 let busy = false;
+let activeAction = null;
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[ch]);
 function notice(message, good=false){const box=$("notice");box.textContent=message;box.classList.remove("hidden");box.classList.toggle("good",good);setTimeout(()=>box.classList.add("hidden"),9000)}
 async function request(path, data){const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json","X-G100-Token":token},body:JSON.stringify(data)});const body=await response.json();if(!response.ok)throw Error(body.error||"Request failed");return body}
 function selectedSerials(){return [...selected].filter(serial=>current.state.probes.some(p=>p.serial===serial))}
 function render(){if(!current)return;const state=current.state;
-  const release=state.release;$("release-status").innerHTML=release?`Latest release: <strong>${esc(release.tag)}</strong> · Firmware ${esc(release.version)} · <a href="${esc(release.url)}" target="_blank" rel="noopener">GitHub release</a>`:esc(state.release_error||"No firmware release checked yet.");
+  const release=state.release;$("release-status").innerHTML=activeAction==="/api/release"?"Checking the latest GitHub release and verifying firmware files…":release?`Latest release: <strong>${esc(release.tag)}</strong> · Firmware ${esc(release.version)} · <a href="${esc(release.url)}" target="_blank" rel="noopener">GitHub release</a>`:esc(state.release_error||"No firmware release checked yet.");
   const probes=$("probes");probes.classList.toggle("empty",!state.probes.length);
   probes.innerHTML=state.probes.length?state.probes.map(p=>{const i=state.inspected[p.serial],checked=selected.has(p.serial)?"checked":"";const detail=i?(i.error?`<div class="detail">${esc(i.error)}</div>`:`<div class="detail">MCU UID: ${esc(i.uid)} · Internal Flash: ${esc(i.internal_flash)}</div><div class="contents">${i.images.map(s=>`<span>${["A","B","Factory"][s.slot]}: ${esc(s.state)}${s.payload_bytes?` · ${esc(s.payload_bytes)} B`:``}</span>`).join("")}</div><div class="detail">Boot metadata: ${esc(i.metadata.filter(Boolean).length)} valid sector(s)</div>`):`<div class="detail">Not inspected yet.</div>`;return `<label class="probe"><input type="checkbox" data-serial="${esc(p.serial)}" ${checked} ${state.running?"disabled":""}><div><div class="probe-title">ST-LINK ${esc(p.usb_product_id)} <span class="badge ${i&&i.error?"bad":""}">${i?(i.error?"INSPECTION FAILED":"INSPECTED"):"CONNECTED"}</span></div><div class="probe-sub">Probe serial: ${esc(p.serial)}</div>${detail}</div></label>`}).join(""):"No ST-LINK found. Check USB connection and driver.";
   probes.querySelectorAll("input[data-serial]").forEach(input=>input.addEventListener("change",()=>{input.checked?selected.add(input.dataset.serial):selected.delete(input.dataset.serial);renderButtons()}));
@@ -18,7 +19,7 @@ function render(){if(!current)return;const state=current.state;
 }
 function renderButtons(){const running=current?.state.running||busy,serials=selectedSerials(),valid=serials.length&&serials.every(s=>current.state.inspected[s]?.uid&&!current.state.inspected[s]?.error),mode=document.querySelector('input[name="mode"]:checked').value;$("scan").disabled=running;$("release").disabled=running;$("inspect").disabled=running||!serials.length;$("start").disabled=running||!valid||(mode==="install"&&!current.state.release)}
 async function refresh(){try{const response=await fetch("/api/state",{cache:"no-store"});current=await response.json();token=current.token;render()}catch(error){notice(error.message)}}
-async function action(path,data={}){if(busy)return;busy=true;renderButtons();try{await request(path,data);await refresh()}catch(error){notice(error.message);await refresh()}finally{busy=false;renderButtons()}}
+async function action(path,data={}){if(busy)return;busy=true;activeAction=path;render();try{await request(path,data);await refresh()}catch(error){notice(error.message);await refresh()}finally{busy=false;activeAction=null;render()}}
 $("scan").addEventListener("click",async()=>{selected.clear();await action("/api/scan")});
 $("release").addEventListener("click",()=>action("/api/release"));
 $("inspect").addEventListener("click",()=>action("/api/inspect",{serials:selectedSerials()}));
