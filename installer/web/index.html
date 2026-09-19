@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SAIS-CG100 Programmer</title>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar"><div class="brand"><span class="brand-mark">S</span><span>SAIS / CG100</span></div><span class="local">LOCAL PROGRAMMER</span></header>
+    <main>
+      <div class="intro"><div class="eyebrow">BOARD PROVISIONING · WINDOWS 10/11</div><h1>Program every connected G100 board with confidence.</h1><p>Connect the hardware, inspect each board, review the latest release, and confirm the operation. The programmer backs up and verifies onboard memory for every board.</p></div>
+      <div id="notice" class="notice hidden" role="status"></div>
+      <section class="card"><div class="step">01 <span>Prepare</span></div><h2>Connections and release</h2><div class="checklist"><label><input type="checkbox" class="ready-check"> Each board has power and its own ST-LINK connected over USB.</label><label><input type="checkbox" class="ready-check"> Ethernet is connected for runtime tests, preferably through a DHCP network.</label><label><input type="checkbox" class="ready-check"> This computer has Internet access to the GitHub release.</label></div><div class="actions"><button id="scan" class="button">Scan ST-LINK probes</button><button id="release" class="button secondary">Fetch latest firmware</button></div><div id="release-status" class="release-box">No firmware release checked yet.</div></section>
+      <section class="card"><div class="step">02 <span>Inspect</span></div><h2>Connected boards</h2><p class="section-copy">Select probes and inspect their MCU UID, internal Flash and external NOR before any erase.</p><div id="probes" class="probe-list empty">Scan for connected ST-LINK probes.</div><div class="actions"><button id="inspect" class="button secondary">Inspect selected boards</button></div></section>
+      <section class="card"><div class="step">03 <span>Run</span></div><h2>Choose an operation</h2><div class="mode-grid"><label class="mode"><input type="radio" name="mode" value="install" checked><span><strong>Erase and install</strong><small>Back up both memories, erase them, install the latest release, verify all bytes, and test Ethernet.</small></span></label><label class="mode"><input type="radio" name="mode" value="erase-only"><span><strong>Erase only</strong><small>Back up both memories, erase all onboard Flash and NOR, then verify they are blank.</small></span></label></div><div class="run-row"><label for="workers">Parallel boards</label><select id="workers"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select><span class="muted">Limited by available ST-LINK probes and host resources.</span></div><p class="warning">This operation deletes all existing data in the selected boards' 128 KiB internal Flash and 16 MiB NOR. MCU UID, OTP and option bytes are outside this operation. A verified backup is saved before deletion.</p><button id="start" class="button danger">Review and start</button></section>
+      <section class="card"><div class="step">04 <span>Results</span></div><h2>Progress and report</h2><div id="progress" class="progress-list empty">No run started.</div><div id="report" class="report-box hidden"></div></section>
+    </main>
+    <footer>SAIS-CG100 · Local interface at 127.0.0.1 · Backups and reports are stored under your local application data folder.</footer>
+  </div>
+</body>
+</html>

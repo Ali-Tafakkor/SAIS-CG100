@@ -1,0 +1,70 @@
+name: Build Windows programmer release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify pinned toolchains
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tools = Get-Content tools/toolchain-manifest.json -Raw | ConvertFrom-Json
+          New-Item -ItemType Directory -Force .cache | Out-Null
+          foreach ($name in @('compiler','openocd','python')) {
+            $entry = $tools.$name
+            $archive = Join-Path '.cache' "$name.zip"
+            Invoke-WebRequest -Uri $entry.url -OutFile $archive
+            if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $entry.sha256) {
+              throw "Checksum mismatch for $name"
+            }
+            if ($name -ne 'python') {
+              Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path '.cache' $name)
+            }
+          }
+      - name: Build firmware and Stage 0
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:G100_COMPILER_BIN = (Resolve-Path '.cache/compiler/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin').Path
+          & .\SetAPIs_Calling\scripts\build.ps1 -Profile shadow
+          if ($LASTEXITCODE -ne 0) { throw 'Firmware build failed' }
+          python scripts/architecture/build-boot.py
+          if ($LASTEXITCODE -ne 0) { throw 'Stage 0 build failed' }
+      - name: Run safety and source checks
+        shell: pwsh
+        run: |
+          python -m unittest discover -s installer/tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed' }
+          python tools/check_public.py
+          if ($LASTEXITCODE -ne 0) { throw 'Public source scan failed' }
+      - name: Create firmware assets and portable ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python tools/make_release.py $env:GITHUB_REF_NAME dist/release
+          if ($LASTEXITCODE -ne 0) { throw 'Firmware manifest failed' }
+          $openocd = (Resolve-Path '.cache/openocd/xpack-openocd-0.12.0-7').Path
+          & .\tools\build-package.ps1 -PythonEmbedZip '.cache/python.zip' -OpenOcdRoot $openocd -Tag $env:GITHUB_REF_NAME
+          if ($LASTEXITCODE -ne 0) { throw 'Portable package failed' }
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @(
+            'dist/SAIS-CG100-Programmer-win-x64.zip',
+            'dist/release/firmware-manifest.json',
+            'dist/release/g100-api.bin',
+            'dist/release/stage0.bin'
+          )
+          gh release create $env:GITHUB_REF_NAME --verify-tag --title "SAIS-CG100 $env:GITHUB_REF_NAME" --notes "Portable Windows programmer and verified G100 firmware assets. Review the operator guide and qualification status before field use." @assets
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

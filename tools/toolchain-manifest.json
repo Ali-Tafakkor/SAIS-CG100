@@ -1,0 +1,17 @@
+{
+  "compiler": {
+    "version": "15.2.1-1.1",
+    "url": "https://github.com/xpack-dev-tools/arm-none-eabi-gcc-xpack/releases/download/v15.2.1-1.1/xpack-arm-none-eabi-gcc-15.2.1-1.1-win32-x64.zip",
+    "sha256": "BAE6A3D1667697CE750C3B13D6D26D80973ECEDC2CC87BF04869E83447FD93EA"
+  },
+  "openocd": {
+    "version": "0.12.0-7",
+    "url": "https://github.com/xpack-dev-tools/openocd-xpack/releases/download/v0.12.0-7/xpack-openocd-0.12.0-7-win32-x64.zip",
+    "sha256": "6BFD3C97135AAFEF8AFFC9AF1ACF34FD0E2B9CA26044506F6ABD7F95B7630052"
+  },
+  "python": {
+    "version": "3.13.14",
+    "url": "https://www.python.org/ftp/python/3.13.14/python-3.13.14-embed-amd64.zip",
+    "sha256": "90B4E5B9898B72D744650524BFF92377C367F44BD5FBD09E3148656C080AD907"
+  }
+}
