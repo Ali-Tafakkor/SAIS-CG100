@@ -36,6 +36,28 @@ network operation including boot verification took 71.827 seconds. Padding exerc
 image storage, transfer, validation and loading at capacity, not four megabytes of
 independent application features.
 
+## Published package verification
+
+GitHub Actions run `35862788051` built and published **v0.2.1** from commit
+`1e2613149a1faec1e91d73306c378000992bd602`; all host, ARM, source and packaged-CMD
+checks passed. The public ZIP was downloaded again, its SHA-256 matched GitHub's
+asset digest, its included installer matched source, and its actual CMD passed.
+
+The CI application is 134,824 bytes and recovery is 77,952 bytes. Their sizes
+differ from the original local builds because lwIP assertion messages embed
+absolute source paths. Rebuilding locally with only those macro paths mapped to
+the CI checkout produced byte-for-byte matches for both published binaries.
+Stage 0 was already identical. This is a build-path difference, not a firmware
+feature change.
+
+The downloaded installer's UI then installed the published main image over
+Ethernet: 1.860 seconds for transfer and 13.259 seconds including reboot and
+authenticated acceptance. The running digest matched
+`4324602cb8996debd3eeb6c6f30e538bbee6068eda85ac16af080351d8a3078d`, the application
+was healthy, and generation 2 was confirmed. No SWD tool was used. Physical SWD
+removal was proven during the earlier tests; final disconnection after the
+separate SWD-route test was not assumed without operator confirmation.
+
 ## Remaining deployment qualification
 
 Multiple simultaneous boards, routed/VPN/DHCP deployments, deliberate CPU crashes,
