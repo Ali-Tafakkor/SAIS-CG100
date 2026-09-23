@@ -38,7 +38,7 @@ python -m pip install --target .cache/test-deps unicorn==2.1.4
 python tools/test_firmware_arm.py
 python tools/check_public.py
 node --check installer/web/app.js
-python tools/make_release.py v0.2.0 dist/release
+python tools/make_release.py v0.2.1 dist/release
 ```
 
 Then invoke `tools/build-package.ps1` with the pinned embedded Python ZIP and OpenOCD runtime. It includes `firmware-release/`, the UI, credentials support and `Run-Fleet-Updater.cmd`. Nothing needs to be downloaded during initial installation when using included firmware. The release workflow publishes `recovery.bin` as a separate immutable asset and runs host plus ARM firmware tests first.

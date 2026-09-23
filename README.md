@@ -27,7 +27,7 @@ Firmware requests and responses use a different HMAC key for each board, replay 
 
 ## Qualification status
 
-**v0.2.0** includes firmware **3.3.0-dev-netinstall** and independent recovery **1.0.0-recovery**. Download the new Windows ZIP to obtain the Ethernet routes and corrected launcher; an older installer does not upgrade its own UI automatically.
+**v0.2.1** includes firmware **3.3.0-dev-netinstall** and independent recovery **1.0.0-recovery**. Download the new Windows ZIP to obtain the Ethernet routes and corrected launcher; an older installer does not upgrade its own UI automatically.
 
 Both initial installation routes passed on one board. Ethernet testing with SWD physically removed covered a changed version, cold power cycling, 16 invalid-request/corrupt-image checks, unconfirmed-trial rollback, recovery after an interrupted transfer and power loss, and a maximum-size image. Host tests, actual ARM firmware logic under emulation and packaged Windows startup checks also pass. See the [qualification record](docs/qualification.md) for measured throughput and the limits of this evidence. Multiple-board and broader deployment testing remain necessary before production use.
 
