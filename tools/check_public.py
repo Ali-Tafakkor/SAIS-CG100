@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TEXT_SUFFIXES = {".md", ".txt", ".py", ".ps1", ".cmd", ".tcl", ".c", ".h",
                  ".s", ".ld", ".cfg", ".json", ".yml", ".yaml", ".html",
                  ".css", ".js", ".gitignore"}
-EXCLUDED = {".git", ".cache", ".local-test", "dist", "runtime", "build", "build-shadow", "__pycache__"}
+EXCLUDED = {".git", ".cache", ".local-test", "dist", "runtime", "build", "build-shadow", "build-recovery", "__pycache__"}
 PROHIBITED = re.compile("|".join((
     "003A0045" + "3332511834353830",
     "0039001D" + "3332511834353830",

@@ -3,8 +3,10 @@
 
 /* Device name, hostname and legacy slot are derived from the silicon UID. */
 #define G100_DEVICE_MODEL            "G100"
-#ifdef G100_SHADOW
-#define G100_FIRMWARE_VERSION         "3.1.3-dev-sdram"
+#ifdef G100_RECOVERY
+#define G100_FIRMWARE_VERSION         "1.0.0-recovery"
+#elif defined(G100_SHADOW)
+#define G100_FIRMWARE_VERSION         "3.3.0-dev-netinstall"
 #else
 #define G100_FIRMWARE_VERSION         "3.0.0-dev-rj45"
 #endif

@@ -7,6 +7,10 @@
 #include "lwip/netif.h"
 #include "main.h"
 #include <string.h>
+#ifdef G100_SHADOW
+#include "config_store.h"
+#include "rj_json.h"
+#endif
 
 extern struct netif gnetif;
 
@@ -64,6 +68,27 @@ void g100_network_init(uint32_t now) {
     strncpy(configured_hostname, g100_device_hostname(), sizeof(configured_hostname) - 1);
     configured_hostname[sizeof(configured_hostname) - 1] = 0;
     netif_set_hostname(&gnetif, configured_hostname);
+#ifdef G100_SHADOW
+    /* Recovery and application restore the same confirmed management address. */
+    static char saved[2048];static RjJson parsed;
+    if(g100_config_load(saved,sizeof(saved),NULL,0) && !rj_parse(&parsed,saved)) {
+        int net=rj_get(&parsed,0,"network");
+        char ip[16]="0.0.0.0",gw[16]="0.0.0.0",host[64],dns1[16]="",dns2[16]="";
+        if(net>=0 && rj_string(&parsed,rj_get(&parsed,net,"hostname"),host,sizeof(host))>=0) {
+            int dhcp=rj_eq(&parsed,rj_get(&parsed,net,"mode"),"dhcp");
+            rj_string(&parsed,rj_get(&parsed,net,"ipv4_address"),ip,sizeof(ip));
+            rj_string(&parsed,rj_get(&parsed,net,"gateway"),gw,sizeof(gw));
+            int prefix=(int)rj_number(&parsed,rj_get(&parsed,net,"prefix_length"));
+            int dns=rj_get(&parsed,net,"dns_servers");
+            if(dns>=0 && parsed.t[dns].count>0) {
+                int first=dns+1;rj_string(&parsed,first,dns1,sizeof(dns1));
+                if(parsed.t[dns].count>1) rj_string(&parsed,parsed.t[first].next,dns2,sizeof(dns2));
+            }
+            if(dhcp || (prefix>=1 && prefix<=30 && rj_ipv4(ip,NULL) && rj_ipv4(gw,NULL)))
+                g100_network_configure(dhcp,ip,prefix,gw,host,dns1,dns2);
+        }
+    }
+#endif
     previous_link_up = netif_is_link_up(&gnetif) ? 1 : 0;
     if (previous_link_up)
         start_dhcp(now);

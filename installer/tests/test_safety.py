@@ -27,6 +27,7 @@ class SafetyTests(unittest.TestCase):
         control = controller.Controller()
         control.boards[SERIAL] = {"uid": UID, "state": "queued"}
         with tempfile.TemporaryDirectory() as temporary, \
+             mock.patch.object(release, "STATE_ROOT", Path(temporary)), \
              mock.patch.object(hardware, "full_backup", side_effect=hardware.HardwareError("bad backup")), \
              mock.patch.object(hardware, "erase_all") as erase:
             result = control._run_board(Path(temporary), "erase-only",

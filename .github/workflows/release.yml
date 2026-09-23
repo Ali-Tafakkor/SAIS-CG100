@@ -37,6 +37,8 @@ jobs:
           $env:G100_COMPILER_BIN = (Resolve-Path '.cache/compiler/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin').Path
           & .\SetAPIs_Calling\scripts\build.ps1 -Profile shadow
           if ($LASTEXITCODE -ne 0) { throw 'Firmware build failed' }
+          & .\SetAPIs_Calling\scripts\build.ps1 -Profile recovery
+          if ($LASTEXITCODE -ne 0) { throw 'Recovery build failed' }
           python scripts/architecture/build-boot.py
           if ($LASTEXITCODE -ne 0) { throw 'Stage 0 build failed' }
       - name: Run safety and source checks
@@ -44,6 +46,12 @@ jobs:
         run: |
           python -m unittest discover -s installer/tests -v
           if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed' }
+          python -m pip install --target .cache/test-deps unicorn==2.1.4
+          if ($LASTEXITCODE -ne 0) { throw 'ARM test dependency failed' }
+          python tools/test_firmware_arm.py
+          if ($LASTEXITCODE -ne 0) { throw 'ARM firmware fault tests failed' }
+          node --check installer/web/app.js
+          if ($LASTEXITCODE -ne 0) { throw 'Installer JavaScript failed' }
           python tools/check_public.py
           if ($LASTEXITCODE -ne 0) { throw 'Public source scan failed' }
       - name: Create firmware assets and portable ZIP
@@ -55,6 +63,8 @@ jobs:
           $openocd = (Resolve-Path '.cache/openocd/xpack-openocd-0.12.0-7').Path
           & .\tools\build-package.ps1 -PythonEmbedZip '.cache/python.zip' -OpenOcdRoot $openocd -Tag $env:GITHUB_REF_NAME
           if ($LASTEXITCODE -ne 0) { throw 'Portable package failed' }
+          python tools/test_package.py
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged CMD startup test failed' }
       - name: Publish release
         shell: pwsh
         env:
@@ -64,7 +74,13 @@ jobs:
             'dist/SAIS-CG100-Programmer-win-x64.zip',
             'dist/release/firmware-manifest.json',
             'dist/release/g100-api.bin',
-            'dist/release/stage0.bin'
+            'dist/release/stage0.bin',
+            'dist/release/recovery.bin'
           )
-          gh release create $env:GITHUB_REF_NAME --verify-tag --title "SAIS-CG100 $env:GITHUB_REF_NAME" --notes "Portable Windows programmer and verified G100 firmware assets. Review the operator guide and qualification status before field use." @assets
+          $notes = "docs/releases/$env:GITHUB_REF_NAME.md"
+          if (Test-Path -LiteralPath $notes) {
+            gh release create $env:GITHUB_REF_NAME --verify-tag --title "SAIS-CG100 $env:GITHUB_REF_NAME" --notes-file $notes @assets
+          } else {
+            gh release create $env:GITHUB_REF_NAME --verify-tag --title "SAIS-CG100 $env:GITHUB_REF_NAME" --notes "Portable Windows programmer and verified G100 firmware assets. Review the operator guide and qualification status before field use." @assets
+          }
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

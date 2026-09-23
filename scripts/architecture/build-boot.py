@@ -9,6 +9,8 @@ VENDOR = ROOT / 'firmware/ethernet-api/vendor'
 PLATFORM = ROOT / 'firmware/memory-platform'
 BOOT = ROOT / 'firmware/bootloader'
 BIN = ROOT / 'toolchain/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin'
+if not BIN.exists():
+    BIN = ROOT.parent / 'toolchain/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin'
 if os.environ.get('G100_COMPILER_BIN'):
     BIN = Path(os.environ['G100_COMPILER_BIN'])
 OUT = BOOT / 'build'
@@ -21,7 +23,7 @@ common = ['-mcpu=cortex-m7','-mthumb','-mfpu=fpv5-d16','-mfloat-abi=hard','-DSTM
 common += ['-I'+str(p) for p in includes]
 hal = ['stm32h7xx_hal','stm32h7xx_hal_cortex','stm32h7xx_hal_gpio','stm32h7xx_hal_rcc',
        'stm32h7xx_hal_rcc_ex','stm32h7xx_hal_pwr','stm32h7xx_hal_pwr_ex','stm32h7xx_hal_flash','stm32h7xx_hal_flash_ex']
-sources = [BOOT/'startup.s', BOOT/'main.c',PLATFORM/'board_clock.c',PLATFORM/'board_memory.c',PLATFORM/'boot_state.c',
+sources = [BOOT/'startup.s', BOOT/'main.c',PLATFORM/'board_clock.c',PLATFORM/'board_memory.c',PLATFORM/'boot_state.c',PLATFORM/'boot_policy.c',
            VENDOR/'Core/Src/system_stm32h7xx.c']
 sources += [VENDOR/'Drivers/STM32H7xx_HAL_Driver/Src'/(s+'.c') for s in hal]
 for name, linker, defines in [('stage0','stm32h750-boot.ld',[]),('ram-init','ram-init.ld',['-DG100_RAM_INIT=1'])]:

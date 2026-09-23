@@ -1,35 +1,44 @@
 # SAIS-CG100
 
-Portable Windows provisioning for the **MainBoard v2.6 / STM32H750 / 16 MiB W25Q128JV / 16 MiB SDRAM** G100 development board.
+Portable Windows installation and Ethernet updates for **MainBoard v2.6 / STM32H750 / W25Q128JV 16 MiB / SDRAM 16 MiB**.
 
-**[Download the latest Windows programmer](https://github.com/Ali-Tafakkor/SAIS-CG100/releases/latest/download/SAIS-CG100-Programmer-win-x64.zip)** · [View releases](https://github.com/Ali-Tafakkor/SAIS-CG100/releases) · [Operator guide](docs/operator-guide.md)
+**[Download the published Windows package](https://github.com/Ali-Tafakkor/SAIS-CG100/releases/latest/download/SAIS-CG100-Programmer-win-x64.zip)** | [Operator guide](docs/operator-guide.md) | [Ethernet architecture and API](docs/ethernet-update.md)
 
-The download is a ZIP, not an installer. Extract the entire folder and double-click **`Run-Programmer.cmd`**. The local web interface opens in your browser. No Python, compiler or OpenOCD installation is required on the operator's computer. The package contains a pinned Python runtime and OpenOCD; it downloads the newest published firmware release over HTTPS when an install is selected. Windows 10/11 x64 is the supported host.
+Extract the complete ZIP and run **Run-Programmer.cmd**. Python, OpenOCD, the initial recovery image and the main firmware are included. No compiler or Python installation is required. Use the included firmware offline, or fetch a published release over HTTPS. Windows 10/11 x64 is supported.
 
-## Operator flow
+## Choose an installation route
 
-1. Supply power to each board. Attach **one ST-LINK per board** by USB/SWD. Connect Ethernet for runtime checks and provide Internet access to this computer.
-2. Launch the programmer. Scan probes, fetch the latest firmware, select boards and inspect their MCU UIDs and existing memory contents.
-3. Select **Erase and install** or **Erase only**. Review the exact UIDs. The interface requires a second typed confirmation before it starts.
-4. The programmer independently backs up all 128 KiB of internal Flash and all 16 MiB of external NOR twice per board, verifies the reads match, erases both memories, and verifies that they are blank.
-5. Install mode writes factory, A and B application images and boot metadata to NOR, then writes Stage 0 to internal Flash last. It verifies each write and makes a full final readback. Ethernet checks confirm UID, version, health, architecture, boot and SDRAM status when the network is reachable.
-6. Download the summary report in the interface. Detailed logs, readbacks and the verified original backup are stored under `%LOCALAPPDATA%\SAIS-CG100\reports\<run-id>`.
+| Route | Connections | What happens |
+| --- | --- | --- |
+| Set up with Ethernet | Power, ST-LINK and Ethernet | Verified backup and erase; SWD writes only Stage 0, recovery and board credentials; OpenOCD exits; the main application transfers, boots and is confirmed through Ethernet. |
+| Install everything with SWD | Power and ST-LINK; Ethernet for runtime checks | Recovery plus both application slots are written and verified through SWD. Later Ethernet updates are available. |
+| Install or update over Ethernet | Independent power and Ethernet | Prepared boards receive their first application or a later release without opening or enumerating an ST-LINK. |
+| Erase only | Power and ST-LINK | Verified backup, complete internal/NOR erase and blank verification. |
 
-Multiple selected probes run in parallel up to the configured worker limit. Every OpenOCD invocation selects its probe by the USB serial descriptor and rechecks the MCU UID before a write. Erase-only intentionally leaves the board without bootable firmware. MCU UID, OTP and option bytes are never erased.
+Select one or several boards, review their UIDs and start. Initial provisioning requires `ERASE <count>`; network installation requires `UPDATE <count>`. Progress includes transfer bytes and measured throughput. Reports distinguish written bytes, runtime checks and failures.
 
-**Qualification status:** Firmware `3.1.3-dev-sdram` compiles from this source. USB serial selection and read-only inspection have been exercised on one connected Board02. Full erase, initial installation and simultaneous multi-board operation still require validation on expendable boards before production use. The current firmware exposes development APIs and stores settings in volatile RAM; this is not a security-hardened product image. A missing Ethernet route is reported as a partial result, never as a passed runtime test.
+A resident recovery service starts during a rescue window on every ordinary reset. The main firmware uses two application slots, full readback hashing and a trial boot. An authenticated installer confirms the running version, image digest and health before accepting the trial. Unconfirmed trials roll back. Confirmed settings and protocol configuration survive application updates in redundant NOR records.
 
-## Repository map
+## Updates after deployment
 
-| Path | Purpose |
-| --- | --- |
-| [`installer/`](installer/) | Local browser UI, release client, ST-LINK/OpenOCD hardware layer, parallel workflow and tests. |
-| [`SetAPIs_Calling/firmware/app/`](SetAPIs_Calling/firmware/app/) | G100 application; device label, hostname and fallback address derive from the full silicon UID. |
-| [`firmware/bootloader/`](firmware/bootloader/) | Stage 0 boot source and linker scripts. |
-| [`firmware/memory-platform/`](firmware/memory-platform/) | NOR/SDRAM initialization, image format and boot state. |
-| [`tools/`](tools/) | Release asset and portable ZIP builders. |
-| [`.github/workflows/release.yml`](.github/workflows/release.yml) | Build, test and publish release assets from a version tag. |
+Register boards and enable **Automatic updates** per board, then run **Run-Fleet-Updater.cmd** on a computer with LAN/VPN access to them. The process checks releases hourly while running, tries one reachable board first, then updates the remaining boards with bounded parallelism. Failed firmware releases are held for review. Offline boards are retried later. The computer and board must stay powered; Ethernet does not imply Internet reachability or power over Ethernet.
 
-The operator package downloads **prebuilt firmware assets** from the latest GitHub release. It verifies image lengths and SHA-256 values against the release manifest and checks the image ABI before any write. Firmware build dependencies remain in the release workflow, so each operator computer only needs the ZIP, Internet and hardware connections.
+Firmware requests and responses use a different HMAC key for each board, replay protection and authenticated image digests. Host keys are protected with Windows DPAPI. This is not a TLS listener or verified secure boot; existing management APIs retain their documented development policy. Read the security and qualification boundaries in the [operator guide](docs/operator-guide.md).
 
-The source layout retains the existing STM32 build paths. Third-party CMSIS, HAL, LwIP and Mbed TLS license files remain alongside their source. The portable release contains OpenOCD and Python license files. See [development and release instructions](docs/development.md).
+## Qualification status
+
+**v0.2.0** includes firmware **3.3.0-dev-netinstall** and independent recovery **1.0.0-recovery**. Download the new Windows ZIP to obtain the Ethernet routes and corrected launcher; an older installer does not upgrade its own UI automatically.
+
+Both initial installation routes passed on one board. Ethernet testing with SWD physically removed covered a changed version, cold power cycling, 16 invalid-request/corrupt-image checks, unconfirmed-trial rollback, recovery after an interrupted transfer and power loss, and a maximum-size image. Host tests, actual ARM firmware logic under emulation and packaged Windows startup checks also pass. See the [qualification record](docs/qualification.md) for measured throughput and the limits of this evidence. Multiple-board and broader deployment testing remain necessary before production use.
+
+## Source map
+
+- `installer/`: UI, SWD provisioning, authenticated Ethernet client, credentials, fleet worker and tests.
+- `SetAPIs_Calling/firmware/app/`: application, recovery API, update service and authentication.
+- `firmware/bootloader/`: small internal Stage 0.
+- `firmware/memory-platform/`: boot selection, memory drivers and redundant configuration storage.
+- `tools/test_firmware_arm.py`: actual C firmware logic executed on emulated ARM with NOR faults.
+- `tools/make_release.py`, `tools/build-package.ps1`: firmware assets and standalone Windows ZIP.
+- `.github/workflows/release.yml`: build/test/release on a version tag.
+
+CMSIS, HAL, LwIP, Mbed TLS, Python and OpenOCD license files remain alongside their distributions. See [development instructions](docs/development.md).

@@ -16,3 +16,7 @@ firmware/bootloader/build/
 *.map
 *.o
 *.jsonl
+*.g100-key
+*.dpapi
+
+SetAPIs_Calling/firmware/build-recovery/

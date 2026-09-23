@@ -49,7 +49,23 @@ def test_runtime(uid: str, version: str, image_bytes: int) -> dict:
         return {"status": "unreachable", "reason":
                 "No matching UID answered UDP discovery. Check Ethernet, DHCP and host routing."}
     try:
-        identity = _get_json(ip, "/api/v1/identity")
+        # Recovery intentionally opens a rescue window before a confirmed app boots.
+        deadline = time.monotonic() + 75
+        while True:
+            try:
+                identity = _get_json(ip, "/api/v1/identity")
+                if identity.get("device_id", "").upper() != uid.upper():
+                    raise ValueError("HTTP identity does not match the selected UID")
+                if identity.get("firmware_version") == version:
+                    break
+            except OSError:
+                pass
+            if time.monotonic() >= deadline:
+                raise ValueError("Expected application did not start after the recovery window")
+            time.sleep(1)
+            replacement = _discover(uid, seconds=2)
+            if replacement:
+                ip = replacement
         health = _get_json(ip, "/api/v1/health")
         memory = _get_json(ip, "/api/v1/system/memory")
         checks = {

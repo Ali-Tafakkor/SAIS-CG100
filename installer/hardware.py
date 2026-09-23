@@ -115,7 +115,7 @@ def uid_guard(uid: str) -> str:
 
 
 def run_openocd(serial: str, commands: str, directory: Path,
-                label: str, timeout: int = 1200, reset: bool = True) -> str:
+                label: str, timeout: int = 1200, reset: bool = True, detach: bool = False) -> str:
     if not re.fullmatch(r"(?:[0-9A-F]{2}){1,128}", serial):
         raise HardwareError("Invalid ST-LINK serial")
     directory.mkdir(parents=True, exist_ok=True)
@@ -128,6 +128,7 @@ def run_openocd(serial: str, commands: str, directory: Path,
     script = directory / f"{label}.tcl"
     script.write_text("init\nreset halt\n" + commands +
                       ("reset run\n" if reset else "") +
+                      ("mww 0x5C001054 0\nmww 0xE000EDF0 0xA05F0000\n" if detach else "") +
                       "echo G100_OPERATION_COMPLETE\nshutdown\n", encoding="ascii")
     # ST-LINK serials may contain binary bytes. Tcl hex escapes preserve them.
     selector = 'adapter serial "' + ''.join(
@@ -201,7 +202,7 @@ def read_all(serial: str, uid: str, directory: Path, prefix: str) -> dict[str, P
     commands += f"dump_image {_tcl_path(internal)} 0x08000000 {INTERNAL_BYTES}\n"
     commands += "g100_qspi_read_map\n"
     commands += f"flash read_bank 1 {_tcl_path(nor)} 0 {NOR_BYTES}\n"
-    run_openocd(serial, commands, directory, prefix, timeout=1800)
+    run_openocd(serial, commands, directory, prefix, timeout=1800, detach=True)
     if internal.stat().st_size != INTERNAL_BYTES or nor.stat().st_size != NOR_BYTES:
         raise HardwareError("Full onboard Flash read was incomplete")
     return {"internal": internal, "nor": nor}
@@ -278,35 +279,55 @@ def _write_metadata(directory: Path, index: int, raw: bytes) -> str:
             f"flash verify_bank 1 {_tcl_path(whole)} {offset}\n")
 
 
-def prepare_install(directory: Path, app: bytes, stage0: bytes) -> dict:
+def prepare_install(directory: Path, app: bytes, stage0: bytes, *, recovery: bytes | None = None,
+                    provision: bytes | None = None, bootstrap_only: bool = False) -> dict:
     from image_format import pack, meta_pack, FACTORY_BYTES, HEADER
     if not 1024 < len(stage0) < INTERNAL_BYTES:
         raise HardwareError("Invalid Stage 0 image")
-    image = pack(app, 1, FACTORY_BYTES - HEADER)
-    metadata = (meta_pack(1, 0, 1), meta_pack(2, 0, 1))
+    from image_format import NONE
+    if bootstrap_only and (recovery is None or provision is None):
+        raise HardwareError("Network installation requires a recovery image and device key")
+    image = pack(app, 1) if not bootstrap_only else None
+    factory = pack(recovery if recovery is not None else app, 1, FACTORY_BYTES - HEADER)
+    images = {2: factory} if bootstrap_only else {2: factory, 0: image, 1: image}
+    metadata = tuple(meta_pack(n, NONE if bootstrap_only else 0, 0 if bootstrap_only else 1) for n in (1, 2))
+    if provision is not None:
+        import zlib
+        if len(provision) != 64 or zlib.crc32(provision[:60]) != struct.unpack_from("<I", provision, 60)[0]:
+            raise HardwareError("Invalid device credential record")
     expected_internal = stage0 + b"\xff" * (INTERNAL_BYTES - len(stage0))
     expected_nor = bytearray(b"\xff" * NOR_BYTES)
-    for offset in IMAGE_OFFSETS:
-        expected_nor[offset:offset + len(image)] = image
+    for slot, value in images.items():
+        offset = IMAGE_OFFSETS[slot]
+        expected_nor[offset:offset + len(value)] = value
+    if provision is not None:
+        expected_nor[0xE0000:0xE0040] = provision
     for offset, value in zip(META_OFFSETS, metadata):
         expected_nor[offset:offset + len(value)] = value
     (directory / "expected-internal.bin").write_bytes(expected_internal)
     (directory / "expected-nor.bin").write_bytes(expected_nor)
-    return {"image": image, "metadata": metadata,
+    return {"image": image, "images": images, "provision": provision, "bootstrap_only": bootstrap_only, "metadata": metadata,
             "internal_sha256": hashlib.sha256(expected_internal).hexdigest(),
             "nor_sha256": hashlib.sha256(expected_nor).hexdigest()}
 
 
 def program(serial: str, uid: str, directory: Path, plan: dict, stage0: Path) -> None:
     commands = uid_guard(uid) + _qspi_writer()
-    for slot in (2, 0, 1):
-        commands += _write_image(directory, slot, plan["image"])
+    for slot, image in plan["images"].items():
+        commands += _write_image(directory, slot, image)
+    if plan.get("provision") is not None:
+        record = directory / "board-access.g100-key"
+        record.write_bytes(plan["provision"])
+        commands += f"flash write_bank 1 {_tcl_path(record)} 917504\n"
+        commands += f"flash verify_bank 1 {_tcl_path(record)} 917504\n"
     for index, raw in enumerate(plan["metadata"]):
         commands += _write_metadata(directory, index, raw)
-    # Internal Stage 0 is committed only after all three images and metadata verify.
+    # Stage 0 is committed only after the selected layout and device key verify.
     commands += f"flash write_image erase {_tcl_path(stage0)} 0x08000000 bin\n"
     commands += f"verify_image {_tcl_path(stage0)} 0x08000000 bin\n"
-    run_openocd(serial, commands, directory, "program", timeout=1800)
+    # End the final SWD session here: release reset, clear debugger watchdog freeze,
+    # and disable core debug. OpenOCD exits before the caller may open Ethernet.
+    run_openocd(serial, commands, directory, "program", timeout=1800, detach=True)
 
 
 def verify_post_write(serial: str, uid: str, directory: Path,

@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import struct
+import zlib
+import credentials
+import fleet_agent
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import secrets
 import threading
-import webbrowser
+import launcher
+from operation_lock import board_lock
 
 from controller import Controller
 
@@ -36,7 +42,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/state":
-            self._json(200, {"state": CONTROL.state(), "token": TOKEN})
+            try:
+                state = CONTROL.state()
+            except Exception as exc:
+                launcher.LOG.exception("Could not read installer state")
+                self._json(503, {"error": f"Cannot read installer state: {exc}. See launcher.log."})
+                return
+            self._json(200, {"state": state, "token": TOKEN})
+            launcher.UI_READY.set()
             return
         if self.path == "/api/report":
             path = CONTROL.report_path
@@ -76,6 +89,37 @@ class Handler(BaseHTTPRequestHandler):
                 result = {"probes": CONTROL.scan()}
             elif self.path == "/api/release":
                 result = {"release": CONTROL.check_release()}
+            elif self.path == "/api/included":
+                result = {"release": CONTROL.load_included()}
+            elif self.path == "/api/network/scan":
+                result = {"boards": CONTROL.scan_network(request.get("address", ""))}
+            elif self.path == "/api/fleet/resume":
+                if CONTROL.running:
+                    raise ValueError("Wait for the current operation to finish")
+                fleet_agent.clear_holds()
+                result = {"ok": True}
+            elif self.path == "/api/fleet/options":
+                if CONTROL.running:
+                    raise ValueError("Wait for the current operation to finish")
+                uid = credentials.checked_uid(request.get("uid", ""))
+                credentials.load_key(uid)
+                automatic = request.get("auto_update", False)
+                if type(automatic) is not bool:
+                    raise ValueError("Automatic update preference must be true or false")
+                result = {"board": credentials.remember(uid, auto_update=automatic)}
+            elif self.path == "/api/fleet/import":
+                if CONTROL.running:
+                    raise ValueError("Wait for the current operation to finish")
+                raw = base64.b64decode(request.get("record", ""), validate=True)
+                if (len(raw) != 64 or struct.unpack_from("<II", raw) != (0x324B5547, 1)
+                        or zlib.crc32(raw[:60]) != struct.unpack_from("<I", raw, 60)[0]):
+                    raise ValueError("Choose the board-access.g100-key file saved during initial installation")
+                uid = "".join(f"{n:08X}" for n in struct.unpack_from("<3I", raw, 8))
+                # Another installer or the unattended worker may own this board.
+                # Do not replace its key midway through an authenticated update.
+                with board_lock(uid):
+                    credentials.store_key(uid, raw[20:52])
+                    result = {"board": credentials.remember(uid)}
             elif self.path == "/api/inspect":
                 result = {"inspected": CONTROL.inspect(request.get("serials", []))}
             elif self.path == "/api/start":
@@ -101,13 +145,21 @@ def main():
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()
+    launcher.prepare()
+    if (WEB.parent.parent / "firmware-release" / "firmware-manifest.json").is_file():
+        CONTROL.load_included()
     with ThreadingHTTPServer(("127.0.0.1", args.port), Handler) as server:
         url = f"http://127.0.0.1:{server.server_port}/"
-        print("SAIS-CG100 Programmer: " + url, flush=True)
-        if not args.no_browser:
-            threading.Timer(0.7, lambda: webbrowser.open(url)).start()
+        launcher.serve_notice(url, not args.no_browser)
         server.serve_forever()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    except Exception as exc:
+        launcher.LOG.exception("Installer startup failed")
+        print(f"Installer could not start: {exc}", flush=True)
+        raise SystemExit(1)

@@ -1,39 +1,58 @@
 # Operator guide
 
-## Hardware and host
+## Prepare
 
-- Windows 10/11 x64 computer with Internet access and at least 110 MiB of free working space per board.
-- MainBoard v2.6 with STM32H750, W25Q128JV 16 MiB external NOR and 16 MiB SDRAM. Other revisions are not supported by this programmer.
-- One USB ST-LINK/SWD connection per board, plus board power. Use separate ST-LINK probes with distinct USB serial numbers.
-- Ethernet connection to the same routed network as the computer if Ethernet runtime checks are required. DHCP is recommended for a batch. A direct-link fallback address is derived from the MCU UID, but a short IPv4 host number can collide across a large batch.
+1. Extract the entire Windows ZIP. Keep its directory structure intact.
+2. Connect independent board power. A DHCP network is recommended, especially for several boards. A direct cable requires a compatible host subnet; the installer does not silently change Windows networking or firewall rules.
+3. For a new board, connect one ST-LINK per board and Ethernet. For a prepared board, Ethernet alone is sufficient for communication.
+4. Run `Run-Programmer.cmd`. The UI is local at `127.0.0.1`. Choose **Use included firmware** for the tested offline package, or **Fetch latest firmware** to download a published release.
 
-The programmer uses bundled OpenOCD and libusb. If the scan finds no ST-LINK, inspect the USB cable, board power, SWD wiring and driver. Keep other programming/debugging tools closed during a run.
+Keep the console window open while using the installer. It prints the exact local URL. If the default browser does not connect, the launcher tries installed browser executables. You can also paste the printed URL into your browser or open `%LOCALAPPDATA%/SAIS-CG100/Open-Installer.url`. Startup diagnostics are saved to `launcher.log` in that same state directory. If startup fails, the console stays open with the error; no board operation starts automatically.
 
-## Start a run
+## Initial setup with Ethernet
 
-1. Download the complete ZIP from the release link on the repository home page. Extract it; do not run the CMD file from inside the ZIP viewer.
-2. Double-click `Run-Programmer.cmd`. A local browser page opens at `127.0.0.1`. Keep the launcher running until the batch completes.
-3. Select **Scan ST-LINK probes** and **Fetch latest firmware**. For **Erase only**, downloading firmware is optional.
-4. Select the desired probes and choose **Inspect selected boards**. Review each full MCU UID, current internal Flash state, three NOR image headers and boot metadata. An inspection error blocks that board.
-5. Choose **Erase and install** or **Erase only**, and set parallel workers. Press **Review and start**, review the full UIDs, then type the displayed confirmation phrase. The app does not erase before this confirmation.
-6. Wait for all boards. Do not disconnect a board during backup, erase, programming or readback. Save the JSON summary and keep the per-board backup directories.
+Choose **Set up with Ethernet**, scan probes, select boards and inspect them. Review UIDs and type the requested `ERASE <count>` phrase. All firmware and runtime dependencies are validated before erasing. A per-board update key is saved and read back before deletion.
 
-The initial estimated time is approximate. A complete 16 MiB NOR read over SWD is slow; two backup reads and full post-write checks can take several minutes per board. Parallel workers reduce batch wall time only when USB/host resources permit it.
+The installer reads both internal Flash and external NOR twice and verifies matching backups. It erases both memories and verifies them blank. It writes a small independent recovery service to NOR, a device access record and empty A/B boot metadata, then writes Stage 0 last. Each written region is read back before the final SWD session releases reset/debug and exits.
 
-If **Fetch latest firmware** fails, no board has been changed. The programmer downloads the latest release manifest from `github.com`, then the binaries for that exact release tag, and verifies their lengths and SHA-256 hashes. It automatically tries Python HTTPS, Windows curl and PowerShell for connection failures. If all fail, check access to `github.com` and `release-assets.githubusercontent.com`, including any local proxy or firewall, and press **Fetch latest firmware** again. TLS certificate checks stay enabled.
+From this boundary onward the installer cannot call SWD. It discovers the same UID over Ethernet, authenticates it and transfers the main image in binary blocks up to 16 KiB. It verifies the NOR digest, starts a trial, checks the running image/version/health and confirms the trial over Ethernet. The ST-LINK cable can remain attached without being used; removing it must not remove board power. SWD pins and option bytes are not permanently disabled.
 
-## Results
+If Ethernet is unavailable after the bootstrap, the recovery service remains available. Fix the cable/routing, choose **Install or update over Ethernet**, discover the board and retry. Do not erase a prepared board just because the network transfer was interrupted.
 
-| Result | Meaning |
-| --- | --- |
-| `passed` | Erase-only: both memories read completely blank. Install: full readback and Ethernet runtime checks passed. |
-| `partial` | Install bytes passed full readback, but no matching board answered Ethernet discovery. Check routing, DHCP and link, then retest the network. |
-| `failed` | A hardware, download, checksum, erase, readback or runtime check failed. Review the board's log and JSON report before retrying. |
+## Full SWD installation
 
-Each selected board receives an independent directory under `%LOCALAPPDATA%\SAIS-CG100\reports\<run-id>\board-<UID>`. The `verified-backup.json` file records the two matching reads and SHA-256 values. `backup-internal.bin` and `backup-nor.bin` are the original onboard contents. `postwrite-*` files and OpenOCD logs provide verification evidence. Keep backups outside the public repository.
+Choose **Install everything with SWD** when desired. This installs the same network recovery foundation plus the application in A and B. A complete readback remains part of the SWD phase. Runtime checks wait through the recovery window before checking the application. Later updates use the Ethernet route.
 
-Erase-only removes Stage 0 and every byte in internal Flash and external NOR. The board cannot boot until it is programmed again. This operation does not modify the MCU UID, OTP, option bytes, host network settings, SD card or other storage outside the stated onboard memories.
+## Later installation or update
 
-## Qualification boundary
+Choose **Install or update over Ethernet**. Discover boards, or enter a known IPv4 address when broadcast discovery cannot cross your router/VPN. Select registered boards, load firmware and confirm `UPDATE <count>`. This mode does not enumerate ST-LINK probes or execute OpenOCD.
 
-Read-only discovery and source builds have been verified. Full erase, initial installation and concurrent multi-board programming need an expendable-board qualification run before production batches. Firmware security remains in development mode: management APIs are open, settings are volatile and the boot image is integrity-checked but not authenticated.
+Authenticated updates and their dedicated discovery query do not require the controller's address to appear in the legacy source-IP allow-list. Existing non-update management APIs retain that list. The full SWD route also uses authenticated update status for its final runtime checks.
+
+An interruption during upload leaves the confirmed image intact. Retry through Ethernet. A failed trial gets at most two boot attempts, then returns to the confirmed image. A board with no usable application remains in network recovery. Recovery opens a roughly 20-second window on ordinary resets, even if the confirmed application is unhealthy. Application trial confirmation has a two-minute deadline; repeated failures return to recovery/previous firmware.
+
+## Automatic fleet updates
+
+Enable **Automatic updates** per registered board, then leave `Run-Fleet-Updater.cmd` running on a Windows computer connected to the sites through LAN/VPN. It checks GitHub releases hourly. Use a Windows account that can decrypt the enrolled DPAPI keys. Running the script does not install a Windows service or change startup settings. Closing it stops future checks; manual updates remain available.
+
+A reachable board is updated first. Only after it passes does the worker fan out to the rest. Offline devices are retried later. Firmware/authentication failures hold that release to prevent repeated restart loops. Inspect `%LOCALAPPDATA%/SAIS-CG100/fleet-reports/latest.json`, perform a manual recovery if needed, then use **Resume automatic updates after review**. Enabling unattended updates authorizes board restarts; use an operational maintenance policy appropriate to the equipment.
+
+No cloud relay or inbound Internet exposure is created. A reachable site computer/VPN and running agent are required. Publishing a release does not by itself make an isolated industrial network reachable.
+
+## Access files, backups and reports
+
+- Credentials: `%LOCALAPPDATA%/SAIS-CG100/credentials/<UID>.dpapi`, encrypted for the current Windows user.
+- Original verified memory backups and run reports: `%LOCALAPPDATA%/SAIS-CG100/reports/<run-id>/board-<UID>/`.
+- `board-access.g100-key` in the initial installation report directory is a portable recovery credential. Store it privately. It and full NOR backups contain the board update key. Do not publish or email them as ordinary logs.
+- To use another computer, import this access file in the Ethernet section. The installer stores it in that user's DPAPI vault. Ordinary result JSON and UI state exclude the secret key.
+- Settings and configured protocol instances use two NOR records and survive reboot/update. Unconfirmed settings candidates, temporary API operations and existing TLS/credential provisioning remain volatile. Schema compatibility must be preserved by future firmware.
+
+`passed` means the checks for that route completed; it is not physical qualification of a hardware fleet. Full SWD installation can report `partial` when readback passes but Ethernet is unreachable. Network routes report failure when authenticated runtime acceptance cannot be proved. Read the per-board error, not just the progress percentage.
+
+## Performance and qualification
+
+The transport avoids hexadecimal expansion and sends binary blocks up to 16 KiB with readback, retry and digest checks. The UI/report measures actual throughput. Backups and whole-memory blank verification still take time over SWD during initial provisioning. No unconditional Ethernet-versus-SWD speed multiplier is claimed.
+
+The [qualification record](qualification.md) separates software/emulation results from completed physical tests on one board. Before production batches, extend the acceptance procedure in `ethernet-update.md` to your hardware, routed networking, multiple boards and precisely controlled interruption points.
+
+Update traffic is authenticated but not encrypted. Release downloads use certificate-validated HTTPS and manifest hashes; device updates trust the enrolled installer key. Stage 0 uses CRC integrity checks, not a vendor signature. Existing non-update APIs are still development APIs. Use a managed LAN/VPN and complete a production security review before industrial exposure.

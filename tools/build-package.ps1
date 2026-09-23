@@ -26,6 +26,12 @@ Copy-Item -Path (Join-Path $root 'installer/web/*') -Destination (Join-Path $sta
 Copy-Item -LiteralPath (Join-Path $root 'scripts/stlink-h750.cfg') -Destination (Join-Path $stage 'scripts')
 Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination (Join-Path $stage 'README.md')
 Copy-Item -Path (Join-Path $root 'docs/*.md') -Destination (Join-Path $stage 'docs')
+Copy-Item -LiteralPath (Join-Path $root 'installer/Run-Fleet-Updater.cmd') -Destination (Join-Path $stage 'Run-Fleet-Updater.cmd')
+$releaseFolder = Join-Path $root 'dist/release'
+if (-not (Test-Path -LiteralPath (Join-Path $releaseFolder 'recovery.bin'))) { throw 'Build the complete firmware release before packaging.' }
+$firmwareManifest = Get-Content -LiteralPath (Join-Path $releaseFolder 'firmware-manifest.json') -Raw | ConvertFrom-Json
+if ($firmwareManifest.release_tag -ne $Tag) { throw 'Package tag must match the included firmware manifest.' }
+Copy-Item -LiteralPath $releaseFolder -Destination (Join-Path $stage 'firmware-release') -Recurse
 $Tag | Set-Content -LiteralPath (Join-Path $stage 'PACKAGE_VERSION.txt') -Encoding ascii
 Expand-Archive -LiteralPath $pythonZip -DestinationPath (Join-Path $stage 'runtime/python')
 @('python313.zip','.','../../installer') | Set-Content -LiteralPath (Join-Path $stage 'runtime/python/python313._pth') -Encoding ascii
@@ -37,9 +43,14 @@ foreach ($path in @('bin','openocd/scripts','distro-info/licenses')) {
 }
 Copy-Item -LiteralPath (Join-Path $openOcd 'README.md') -Destination (Join-Path $stage 'runtime/openocd/README.md')
 $python = Join-Path $stage 'runtime/python/python.exe'
-& $python -c 'import ctypes, hashlib, http.server, json, socket'
+& $python -c 'import ctypes, hashlib, hmac, http.server, json, socket, credentials, ethernet, fleet_agent, launcher'
 if ($LASTEXITCODE -ne 0) { throw 'Packaged Python runtime validation failed' }
+foreach ($cmdFile in Get-ChildItem -LiteralPath $stage -Filter '*.cmd') {
+    $cmdText = [System.IO.File]::ReadAllText($cmdFile.FullName).Replace("`r`n", "`n").Replace("`n", "`r`n")
+    [System.IO.File]::WriteAllText($cmdFile.FullName, $cmdText, [System.Text.Encoding]::ASCII)
+}
 $zip = Join-Path $root 'dist/SAIS-CG100-Programmer-win-x64.zip'
 Compress-Archive -LiteralPath $stage -DestinationPath $zip -Force
+[System.IO.File]::WriteAllText((Join-Path $root 'dist/latest-package.txt'), "stage-$stamp\SAIS-CG100-Programmer", [System.Text.Encoding]::ASCII)
 Write-Output $zip
 Get-FileHash -LiteralPath $zip -Algorithm SHA256 | Select-Object Hash,Path

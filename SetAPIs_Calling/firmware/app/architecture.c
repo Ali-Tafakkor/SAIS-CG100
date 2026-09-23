@@ -1,4 +1,5 @@
 #include "architecture.h"
+#include "main.h"
 #include "board_memory.h"
 #include "boot_format.h"
 #include "board_status.h"
@@ -8,7 +9,7 @@
 #include <stddef.h>
 extern uint8_t _end,_heap_limit,_ebss,_eimage,_stack_bottom;
 static uint8_t *heap_end;
-static uint32_t heap_peak,selftest_passes,selftest_errors,last_test,last_confirm;
+static uint32_t heap_peak,selftest_passes,selftest_errors,last_test;
 
 /* Explicit bank-aware bounds: the new MSP is in DTCM, not above the AXI heap. */
 void *_sbrk(ptrdiff_t increment) {
@@ -46,11 +47,15 @@ void g100_architecture_process(uint32_t now) {
         for(uint32_t i=0;i<1024;++i) if(p[i]!=((i*0x9E3779B9u)^selftest_passes)) ++selftest_errors;
         ++selftest_passes;
     }
-    if(!G100_BOOT_INFO->confirmed && now>=3000u && selftest_passes>=10u &&
-       g_board_status.stage==BOARD_STAGE_RUNNING && (uint32_t)(now-last_confirm)>=1000u) {
-        last_confirm=now;
-        if(!g100_boot_confirm()) g_board_status.fault=0xA002;
-    }
+    /* Only an authenticated host may accept a trial after checking network health. */
+    if(!(G100_BOOT_INFO->flags&G100_BOOT_TRIAL)) G100_BOOT_INFO->confirmed=1;
+    if((G100_BOOT_INFO->flags&G100_BOOT_TRIAL) && !G100_BOOT_INFO->confirmed && now>=120000u)
+        NVIC_SystemReset();
+
+}
+int g100_architecture_ready(void) {
+    return !g_board_status.fault && !selftest_errors && selftest_passes>=10u &&
+           g_board_status.stage==BOARD_STAGE_RUNNING && HAL_GetTick()>=3000u;
 }
 int g100_architecture_json(char *out,size_t cap) {
     volatile G100BootInfo *i=G100_BOOT_INFO;
@@ -71,7 +76,7 @@ int g100_architecture_json(char *out,size_t cap) {
         "\"stack_watermark_free_bytes\":%lu,\"sdram_test_passes\":%lu,\"sdram_test_errors\":%lu,"
         "\"sd_policy\":\"disabled-this-phase\",\"sd_initialized\":false,\"sd_in_use\":false,"
         "\"sdmmc_clock_enabled\":%s,\"capacity_admission\":\"build-and-image-manifest\","
-        "\"configuration_storage\":\"volatile_ram\"}",
+        "\"configuration_storage\":\"redundant_nor\"}",
         (unsigned long)i->image_bytes,(unsigned long)G100_IMAGE_MAX,(unsigned long)i->reserved[0],
         (unsigned long)i->selected_slot,(unsigned long)i->generation,(unsigned long)i->flags,
         i->confirmed?"true":"false",(unsigned long)i->memory_errors,(unsigned long)i->boot_cycles,

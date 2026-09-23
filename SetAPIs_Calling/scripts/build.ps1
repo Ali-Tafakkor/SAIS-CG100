@@ -1,15 +1,20 @@
-param([Alias('Profile')][ValidateSet('internal','shadow')][string]$MemoryProfile = 'internal')
+param([Alias('Profile')][ValidateSet('internal','shadow','recovery')][string]$MemoryProfile = 'internal')
 $ErrorActionPreference = 'Stop'
 $sectionRoot = Split-Path $PSScriptRoot -Parent
 $projectRoot = Split-Path $sectionRoot -Parent
+$toolchainRoot = Join-Path $projectRoot 'toolchain'
+if (-not (Test-Path -LiteralPath (Join-Path $toolchainRoot 'xpack-arm-none-eabi-gcc-15.2.1-1.1/bin/arm-none-eabi-gcc.exe'))) {
+    $toolchainRoot = Join-Path (Split-Path $projectRoot -Parent) 'toolchain'
+}
 $firmwareRoot = Join-Path $sectionRoot 'firmware'
 $vendorRoot = Join-Path $projectRoot 'firmware/ethernet-api/vendor'
 $cryptoRoot = Join-Path $projectRoot 'toolchain/crypto/mbedtls-3.6.5'
 $buildRoot = Join-Path $firmwareRoot 'build'
-if ($MemoryProfile -eq 'shadow') { $buildRoot = Join-Path $firmwareRoot 'build-shadow' }
+if ($MemoryProfile -ne 'internal') { $buildRoot = Join-Path $firmwareRoot 'build-shadow' }
+if ($MemoryProfile -eq 'recovery') { $buildRoot = Join-Path $firmwareRoot 'build-recovery' }
 $memoryRoot = Join-Path $projectRoot 'firmware/memory-platform'
 $objectRoot = Join-Path $buildRoot 'obj'
-$compilerBin = Join-Path $projectRoot 'toolchain/xpack-arm-none-eabi-gcc-15.2.1-1.1/bin'
+$compilerBin = Join-Path $toolchainRoot 'xpack-arm-none-eabi-gcc-15.2.1-1.1/bin'
 if ($env:G100_COMPILER_BIN) { $compilerBin = $env:G100_COMPILER_BIN }
 $gcc = Join-Path $compilerBin 'arm-none-eabi-gcc.exe'
 $objcopy = Join-Path $compilerBin 'arm-none-eabi-objcopy.exe'
@@ -48,7 +53,9 @@ $common = @(
     '-ffunction-sections','-fdata-sections','-fno-common',
     '-Wall','-Wextra','-Wno-unused-parameter'
 ) + $includes
-if ($MemoryProfile -eq 'shadow') { $common += '-DG100_SHADOW=1' }
+if ($MemoryProfile -ne 'internal') { $common += '-DG100_SHADOW=1' }
+
+if ($MemoryProfile -eq 'recovery') { $common += '-DG100_RECOVERY=1' }
 
 $sources = @(
     (Join-Path $firmwareRoot 'app/main.c'),
@@ -106,12 +113,20 @@ $sources = @(
 )
 $cryptoSources = 'platform','platform_util','sha256','md','pkcs5','bignum','bignum_core','bignum_mod','bignum_mod_raw','ecp','ecp_curves','ecdsa','asn1parse','asn1write','oid','pk','pk_ecc','pk_wrap','pkparse','pkwrite','pem','base64','x509','x509_crt','x509_create','x509write_csr','constant_time'
 foreach($name in $cryptoSources) { $sources += Join-Path $cryptoRoot "library/$name.c" }
-if ($MemoryProfile -eq 'shadow') {
+if ($MemoryProfile -ne 'internal') {
     $sources = @($sources | Where-Object { $_ -ne (Join-Path $firmwareRoot 'startup.s') })
     $sources += Join-Path $firmwareRoot 'startup-shadow.s'
     $sources += Join-Path $firmwareRoot 'app/architecture.c'
+    $sources += Join-Path $firmwareRoot 'app/ota_update.c'
+    $sources += Join-Path $firmwareRoot 'app/ota_auth.c'
     $sources += Join-Path $memoryRoot 'board_memory.c'
     $sources += Join-Path $memoryRoot 'boot_state.c'
+    $sources += Join-Path $memoryRoot 'config_store.c'
+}
+
+if ($MemoryProfile -eq 'recovery') {
+    $sources = @($sources | Where-Object { $_ -ne (Join-Path $firmwareRoot 'app/rj_api.c') -and $_ -ne (Join-Path $firmwareRoot 'app/rj_catalogue.c') })
+    $sources += Join-Path $firmwareRoot 'app/recovery_api.c'
 }
 
 $objects = @()
@@ -126,7 +141,7 @@ foreach ($source in $sources) {
 $elf = Join-Path $buildRoot 'g100-api.elf'
 $map = Join-Path $buildRoot 'g100-api.map'
 $linker = Join-Path $firmwareRoot 'stm32h750.ld'
-if ($MemoryProfile -eq 'shadow') { $linker = Join-Path $firmwareRoot 'stm32h750-shadow.ld' }
+if ($MemoryProfile -ne 'internal') { $linker = Join-Path $firmwareRoot 'stm32h750-shadow.ld' }
 & $gcc '-mcpu=cortex-m7' '-mthumb' '-mfpu=fpv5-d16' '-mfloat-abi=hard' `
     '-flto' '-Oz' `
     '-specs=nano.specs' '-specs=nosys.specs' @objects `

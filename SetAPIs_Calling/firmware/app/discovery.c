@@ -6,6 +6,9 @@
 #include "main.h"
 #include "rj_api.h"
 #include "rj_security.h"
+#ifdef G100_SHADOW
+#include "ota_update.h"
+#endif
 
 #include "lwip/pbuf.h"
 #include "lwip/udp.h"
@@ -28,6 +31,9 @@ static struct {
 static unsigned recent_index;
 static uint32_t global_at;
 static unsigned global_count;
+#ifdef G100_SHADOW
+static uint32_t update_discovery_at;
+#endif
 static void modern_receive(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *source,
                            u16_t port) {
     (void)arg;
@@ -89,6 +95,30 @@ void g100_discovery_process(void) {
 static void discovery_receive(void *arg, struct udp_pcb *pcb, struct pbuf *packet,
                               const ip_addr_t *source, u16_t source_port) {
     (void)arg;
+    if (!packet) return;
+#ifdef G100_SHADOW
+    /* Independent of the legacy IP list; these hints never authorize a write.
+     * Replies are no larger than the query and capped at five per second. */
+    if (packet->tot_len == 256u && IP_IS_V4(source)) {
+        uint32_t now = HAL_GetTick();
+        const ip4_addr_t *s = ip_2_ip4(source);
+        if ((uint32_t)(now-update_discovery_at)>=200u && !ip4_addr_isany_val(*s) &&
+            !ip4_addr_ismulticast(s) && !ip4_addr_isbroadcast(s,&gnetif)) {
+            uint8_t request[256];char result[256];
+            pbuf_copy_partial(packet,request,sizeof(request),0);
+            int n=g100_ota_discovery(request,sizeof(request),result,sizeof(result));
+            if(n>0) {
+                update_discovery_at=now;
+                struct pbuf *reply=pbuf_alloc(PBUF_TRANSPORT,(u16_t)n,PBUF_RAM);
+                if(reply) {
+                    if(pbuf_take(reply,result,(u16_t)n)==ERR_OK) (void)udp_sendto(pcb,reply,source,source_port);
+                    pbuf_free(reply);
+                }
+            }
+        }
+        pbuf_free(packet);return;
+    }
+#endif
     const size_t query_length = strlen(G100_DISCOVERY_QUERY);
     char query[sizeof(G100_DISCOVERY_QUERY)];
 

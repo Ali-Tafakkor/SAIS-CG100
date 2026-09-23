@@ -18,7 +18,7 @@ RELEASES = f"https://github.com/{REPO}/releases"
 LATEST_MANIFEST = f"{RELEASES}/latest/download/firmware-manifest.json"
 STATE_ROOT = Path(os.environ.get("G100_STATE_ROOT") or
                   (Path(os.environ.get("LOCALAPPDATA", Path.home())) / "SAIS-CG100"))
-MAX_APP = 0xD0000 - 4096
+MAX_APP = 0x400000 - 4096
 TAG_PATTERN = r"v[0-9]+\.[0-9]+\.[0-9]+(?:[-.][A-Za-z0-9.-]+)?"
 
 
@@ -104,14 +104,21 @@ def latest() -> dict:
     if not isinstance(tag, str) or not re.fullmatch(TAG_PATTERN, tag):
         raise ReleaseError("The latest release tag is invalid")
     assets = {name: f"{RELEASES}/download/{tag}/{name}"
-              for name in ("firmware-manifest.json", "g100-api.bin", "stage0.bin")}
+              for name in ("firmware-manifest.json", "g100-api.bin", "stage0.bin", "recovery.bin")}
     return {"tag": tag, "url": f"{RELEASES}/tag/{tag}", "assets": assets,
             "manifest": manifest}
 
 
 def fetch_bundle(release: dict | None = None) -> dict:
+    from state_lock import file_lock
+    with file_lock("release-cache", wait=300):
+        return _fetch_bundle(release)
+
+def _fetch_bundle(release: dict | None = None) -> dict:
     release = release or latest()
     tag = release["tag"]
+    if not isinstance(tag,str) or not re.fullmatch(TAG_PATTERN,tag):
+        raise ReleaseError("Invalid release tag")
     folder = STATE_ROOT / "cache" / tag
     folder.mkdir(parents=True, exist_ok=True)
     manifest = release.get("manifest")
@@ -122,11 +129,15 @@ def fetch_bundle(release: dict | None = None) -> dict:
             raise ReleaseError("Firmware manifest is not valid JSON") from exc
     if not isinstance(manifest, dict):
         raise ReleaseError("Firmware manifest must be an object")
-    if (manifest.get("schema") != 1 or manifest.get("release_tag") != tag or
+    if (manifest.get("schema") not in (1, 2) or manifest.get("release_tag") != tag or
             manifest.get("hardware") != "MainBoard-v2.6-H750" or
             manifest.get("architecture") != "nor-sdram-shadow-v1"):
         raise ReleaseError("Firmware manifest does not match the selected release/hardware")
     expected_files = {"g100-api.bin": (1024, MAX_APP), "stage0.bin": (1024, 0x20000)}
+    if manifest.get("schema") == 2:
+        if manifest.get("update_protocol") != 2:
+            raise ReleaseError("Unsupported update protocol")
+        expected_files["recovery.bin"] = (1024, 0xD0000 - 4096)
     fetched = {}
     for name, (minimum, maximum) in expected_files.items():
         spec = manifest.get("files", {}).get(name, {})
@@ -145,5 +156,35 @@ def fetch_bundle(release: dict | None = None) -> dict:
         fetched[name] = path
     from image_format import admit
     admit(fetched["g100-api.bin"].read_bytes(), MAX_APP)
+    if "recovery.bin" in fetched:
+        admit(fetched["recovery.bin"].read_bytes(), 0xD0000 - 4096)
     (folder / "firmware-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return {"release": release, "manifest": manifest, "files": fetched}
+
+
+def load_local(folder: Path) -> dict:
+    """Load a prepared offline package, applying exactly the online binary gates."""
+    folder = folder.resolve()
+    manifest = json.loads((folder / "firmware-manifest.json").read_text(encoding="utf-8-sig"))
+    tag = manifest.get("release_tag", "")
+    if not re.fullmatch(TAG_PATTERN, tag):
+        raise ReleaseError("Invalid local release tag")
+    required = {"g100-api.bin": MAX_APP, "stage0.bin": 0x20000}
+    if manifest.get("schema") == 2 and manifest.get("update_protocol") == 2:
+        required["recovery.bin"] = 0xD0000 - 4096
+    elif manifest.get("schema") != 1:
+        raise ReleaseError("Unsupported local manifest")
+    if manifest.get("hardware") != "MainBoard-v2.6-H750" or manifest.get("architecture") != "nor-sdram-shadow-v1":
+        raise ReleaseError("Local package hardware does not match")
+    from image_format import admit
+    files = {}
+    for name, maximum in required.items():
+        path = folder / name
+        spec = manifest["files"][name]
+        content = path.read_bytes()
+        if not 1024 < len(content) <= maximum or len(content) != spec["bytes"] or hashlib.sha256(content).hexdigest() != spec["sha256"]:
+            raise ReleaseError(f"Local {name} failed its SHA-256/length check")
+        if name != "stage0.bin":
+            admit(content, maximum)
+        files[name] = path
+    return {"release": {"tag": tag, "url": "", "local": str(folder)}, "manifest": manifest, "files": files}

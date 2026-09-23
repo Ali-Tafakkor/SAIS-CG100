@@ -13,6 +13,7 @@
 #include <stdint.h>
 #ifdef G100_SHADOW
 #include "architecture.h"
+#include "ota_update.h"
 #endif
 
 extern ETH_HandleTypeDef heth;
@@ -234,6 +235,7 @@ int main(void)
         led_update(now, request_flash_until);
 #ifdef G100_SHADOW
         g100_architecture_process(now);
+        g100_ota_process(now);
 #endif
     }
 }

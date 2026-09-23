@@ -1,6 +1,7 @@
 #include "main.h"
 #include "board_memory.h"
 #include "boot_format.h"
+#include "boot_request.h"
 #include <string.h>
 extern void g100_jump(uint32_t vector) __attribute__((noreturn));
 extern uint8_t _eimage;
@@ -27,6 +28,7 @@ int main(void) {
     info->magic=G100_INFO_MAGIC; info->version=1; info->stage=1;
     info->selected_slot=G100_SLOT_NONE;
     info->reset_cause=RCC->RSR;
+    int application_requested=g100_take_application_request(info->reset_cause);
     RCC->RSR|=RCC_RSR_RMVF;
     HAL_Init();
     if(g100_clock_init()) recovery(0xC101);
@@ -54,41 +56,15 @@ int main(void) {
     __BKPT(0);
     for(;;) __NOP();
 #endif
-    G100BootMeta meta;
     G100ImageHeader image;
     uint32_t selected=G100_SLOT_NONE;
-    int has_meta=g100_meta_read(&meta);
-    if(has_meta) {
-        info->metadata_sequence=meta.sequence;
-        if(meta.trial_slot!=G100_SLOT_NONE && meta.trial_attempts<G100_MAX_TRIAL_ATTEMPTS &&
-           g100_image_validate(meta.trial_slot,&image) && image.generation==meta.trial_generation) {
-            ++meta.trial_attempts;
-            if(g100_meta_write(&meta)) {
-                selected=meta.trial_slot;
-                info->flags|=G100_BOOT_TRIAL;
-                info->metadata_sequence=meta.sequence;
-            } else info->flags|=G100_BOOT_META_DEGRADED;
-        }
-        if(selected==G100_SLOT_NONE && meta.confirmed_slot<=1 &&
-           g100_image_validate(meta.confirmed_slot,&image) && image.generation==meta.confirmed_generation) {
-            selected=meta.confirmed_slot;
-            if(meta.trial_slot!=G100_SLOT_NONE) info->flags|=G100_BOOT_FALLBACK;
-        }
-    }
-    /* If both metadata sectors are lost, prefer the service image over an
-     * arbitrary A/B payload whose previous trial outcome is now unknowable. */
-    if(!has_meta && g100_image_validate(G100_SLOT_FACTORY,&image)) {
+    if(!application_requested && g100_image_validate(G100_SLOT_FACTORY,&image)) {
         selected=G100_SLOT_FACTORY;
-        info->flags|=G100_BOOT_FALLBACK|G100_BOOT_META_DEGRADED;
+        info->flags|=G100_BOOT_FALLBACK;
     }
-    /* Missing/broken metadata: deterministic valid-slot recovery, never unchecked RAM execution. */
-    if(selected==G100_SLOT_NONE) {
-        for(uint32_t slot=0;slot<=G100_SLOT_FACTORY;++slot) {
-            if(has_meta && slot==meta.trial_slot) continue; /* Do not reselect an exhausted/failed trial. */
-            if(g100_image_validate(slot,&image)) {
-                selected=slot; info->flags|=G100_BOOT_FALLBACK; break;
-            }
-        }
+    if(selected==G100_SLOT_NONE) selected=g100_select_application(&image);
+    if(selected==G100_SLOT_NONE && g100_image_validate(G100_SLOT_FACTORY,&image)) {
+        selected=G100_SLOT_FACTORY;info->flags|=G100_BOOT_FALLBACK;
     }
     if(selected==G100_SLOT_NONE) recovery(0xC401);
     info->selected_slot=selected; info->generation=image.generation;

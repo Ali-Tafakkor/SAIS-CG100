@@ -13,6 +13,10 @@
 #include <string.h>
 #ifdef G100_SHADOW
 #include "architecture.h"
+#include "config_store.h"
+#define RJ_CONFIG_STORAGE "redundant_nor"
+#else
+#define RJ_CONFIG_STORAGE "volatile_ram"
 #endif
 extern struct netif gnetif;
 static RjJson input;
@@ -261,6 +265,15 @@ void rj_api_init(void) {
     snprintf(settings, sizeof(settings), default_settings_format,
              g100_device_name(), g100_device_hostname());
     strcpy(instances, "[]");
+#ifdef G100_SHADOW
+    if(g100_config_load(settings,sizeof(settings),instances,sizeof(instances))) {
+        settings_revision=instances_revision=g100_config_revision();
+        static RjJson saved;char why[128];
+        if(!settings_valid(settings) || rj_parse(&saved,instances) || !validate_instances(&saved,0,why,sizeof(why))) {
+            g_board_status.fault=0xA003; /* Incompatible configuration must not confirm a trial. */
+        }
+    }
+#endif
 }
 void rj_api_process(uint32_t now) {
     if (network_pending == 1 && (uint32_t)(now - apply_at) >= 2000) {
@@ -329,7 +342,7 @@ int rj_api_handle(const RjRequest *r, char *out, size_t cap, char *extra, size_t
             "{\"product\":\"AIScella CONNECT "
             "G100\",\"firmware_version\":\"%s\",\"profile\":\"rj45-configuration-only-v1\",\"full_"
             "v1_conformant\":false,\"security_mode\":\"development_plaintext\",\"authentication_"
-            "required\":false,\"configuration_storage\":\"volatile_ram\",\"discovery\":{\"port\":"
+            "required\":false,\"configuration_storage\":\"" RJ_CONFIG_STORAGE "\",\"discovery\":{\"port\":"
             "55670,\"legacy_port\":37020},\"resources\":[\"identity\",\"health\",\"system/"
             "status\",\"capabilities\",\"interfaces\",\"protocols\",\"protocol-instances\","
             "\"settings\",\"security/mode\",\"manufacturing/super-operator/"
@@ -374,8 +387,8 @@ int rj_api_handle(const RjRequest *r, char *out, size_t cap, char *extra, size_t
             "\"protocol_settings_revision\":%u,\"settings_revision\":%u,\"active_configuration_"
             "id\":null,\"active_package_sha256\":null,\"security_mode\":\"development_plaintext\","
             "\"authentication_required\":false,\"network\":%s,\"storage\":{\"configuration\":"
-            "\"volatile_ram\"},\"warnings\":[\"Development APIs are open\",\"Configuration is lost "
-            "on reset; export before reset\",\"Protocol drivers and Flow runtime are not "
+            "\"" RJ_CONFIG_STORAGE "\"},\"warnings\":[\"Development APIs are open\",\"Unconfirmed settings are discarded "
+            "on reset\",\"Protocol drivers and Flow runtime are not "
             "implemented\",\"TLS provisioning is volatile; HTTPS listener is not implemented\"]}",
             uid, boot_id, G100_FIRMWARE_VERSION, (unsigned long)HAL_GetTick(), instances_revision,
             settings_revision, net);
@@ -474,11 +487,14 @@ int rj_api_handle(const RjRequest *r, char *out, size_t cap, char *extra, size_t
             }
             if (network_pending)
                 FAIL(409, "DEVICE_BUSY", "Network settings change is pending");
+#ifdef G100_SHADOW
+            if(!g100_config_save(settings,next)) FAIL(500,"CONFIG_SAVE_FAILED","Previous configuration retained");
+#endif
             strcpy(instances, next);
             instances_revision++;
         }
         snprintf(out, cap,
-                 "{\"revision\":%u,\"instances\":%s,\"storage\":\"volatile_ram\",\"applied_to_"
+                 "{\"revision\":%u,\"instances\":%s,\"storage\":\"" RJ_CONFIG_STORAGE "\",\"applied_to_"
                  "drivers\":false}",
                  instances_revision, instances);
         append(extra, extra_cap, "ETag: \"protocols-%u\"\r\n", instances_revision);
@@ -504,7 +520,7 @@ int rj_api_handle(const RjRequest *r, char *out, size_t cap, char *extra, size_t
             strcpy(pending, "null");
         snprintf(out, cap,
                  "{\"revision\":%u,\"settings\":%s,\"pending_operation_id\":%s,\"storage\":"
-                 "\"volatile_ram\"}",
+                 "\"" RJ_CONFIG_STORAGE "\"}",
                  settings_revision, settings, pending);
         append(extra, extra_cap, "ETag: \"settings-%u\"\r\n", settings_revision);
         return 200;
@@ -625,7 +641,7 @@ int rj_api_handle(const RjRequest *r, char *out, size_t cap, char *extra, size_t
         if (!strcmp(operation_state, "succeeded")) {
             snprintf(out, cap,
                      "{\"revision\":%u,\"settings\":%s,\"pending_operation_id\":null,\"storage\":"
-                     "\"volatile_ram\"}",
+                     "\"" RJ_CONFIG_STORAGE "\"}",
                      settings_revision, settings);
             return 200;
         }
@@ -635,6 +651,9 @@ int rj_api_handle(const RjRequest *r, char *out, size_t cap, char *extra, size_t
         ip_string(actual, netif_ip4_addr(&gnetif));
         if (!strcmp(actual, "0.0.0.0") || strcmp(actual, r->local_ip))
             FAIL(403, "WRONG_CONFIRMATION_PATH", "Reconnect through the new management address");
+#ifdef G100_SHADOW
+        if(!g100_config_save(candidate,instances)) FAIL(500,"CONFIG_SAVE_FAILED","Previous configuration retained; network rollback remains active");
+#endif
         strcpy(settings, candidate);
         candidate[0] = 0;
         candidate_valid = 0;
@@ -643,7 +662,7 @@ int rj_api_handle(const RjRequest *r, char *out, size_t cap, char *extra, size_t
         strcpy(operation_state, "succeeded");
         snprintf(out, cap,
                  "{\"revision\":%u,\"settings\":%s,\"pending_operation_id\":null,\"storage\":"
-                 "\"volatile_ram\"}",
+                 "\"" RJ_CONFIG_STORAGE "\"}",
                  settings_revision, settings);
         return 200;
     }

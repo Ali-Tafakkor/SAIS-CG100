@@ -10,12 +10,16 @@
 #include "main.h"
 #include "rj_api.h"
 #include "rj_json.h"
+#ifdef G100_SHADOW
+#include "ota_update.h"
+#include "ota_auth.h"
+#endif
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
 typedef struct {
-    char request[RJ_BODY_MAX + 2049];
+    char request[RJ_BODY_MAX + 36 + 2049];
     char response[RJ_RESPONSE_MAX + 1024];
     unsigned response_size, queued, acknowledged;
     int in_use, responding;
@@ -148,7 +152,7 @@ static int body_length(const char *request, const char *end, unsigned *length) {
             unsigned n = 0;
             while (p < next && isdigit((unsigned char)*p)) {
                 n = n * 10u + (unsigned)(*p++ - '0');
-                if (n > RJ_BODY_MAX)
+                if (n > RJ_BODY_MAX + 36u)
                     return -2;
             }
             while (p < next && (*p == ' ' || *p == '\t'))
@@ -206,6 +210,8 @@ static const char *status_text(int s) {
         return "204 No Content";
     case 400:
         return "400 Bad Request";
+    case 401:
+        return "401 Unauthorized";
     case 403:
         return "403 Forbidden";
     case 404:
@@ -271,21 +277,46 @@ static err_t led_response(struct tcp_pcb *pcb, HttpConnection *c) {
              (unsigned long)led_period_ms(), (unsigned long)led_transition_count());
     return send_response(pcb, c, "200 OK", body);
 }
-static err_t handle_request(struct tcp_pcb *pcb, HttpConnection *c, const char *body) {
+static err_t handle_request(struct tcp_pcb *pcb, HttpConnection *c, const char *body, unsigned body_bytes) {
     char method[8], path[160], version[16], json[720];
     int consumed = 0;
-    if (!g100_source_is_authorized(&pcb->remote_ip))
-        return send_response(pcb, c, "403 Forbidden",
-                             "{\"ok\":false,\"error\":\"source IP is not authorized\"}");
     const char *line_end = strstr(c->request, "\r\n");
     if (sscanf(c->request, "%7s %159s %15s%n", method, path, version, &consumed) != 3 ||
         !line_end || c->request + consumed != line_end ||
         (strcmp(version, "HTTP/1.1") && strcmp(version, "HTTP/1.0")))
         return send_response(pcb, c, "400 Bad Request",
                              "{\"ok\":false,\"error\":\"invalid request line\"}");
+    /* The new update API authenticates a board-specific key. Its reachability
+     * must not depend on the legacy controller-IP list (DHCP and VPN change it).
+     * Every existing management/legacy endpoint retains its original policy. */
+    if (!g100_source_is_authorized(&pcb->remote_ip)
+#ifdef G100_SHADOW
+        && strncmp(path, "/api/v1/firmware/", 17)
+#endif
+    )
+        return send_response(pcb, c, "403 Forbidden",
+                             "{\"ok\":false,\"error\":\"source IP is not authorized\"}");
     if (!strcmp(method, "OPTIONS"))
         return send_response_ex(pcb, c, "204 No Content", "",
                                 "Allow: GET, POST, PUT, DELETE, OPTIONS\r\n", "application/json");
+#ifdef G100_SHADOW
+    if (!strncmp(path, "/api/v1/firmware/", 17)) {
+        static char ota_result[1536];
+        char content_type[80];
+        if (header_value(c->request, "Content-Type", content_type, sizeof(content_type)) < 0)
+            return send_response(pcb,c,"400 Bad Request","{\"error\":\"HEADER_INVALID\"}");
+        if (body_bytes && strcmp(content_type,"application/octet-stream"))
+            return send_response(pcb,c,"415 Unsupported Media Type","{\"error\":\"CONTENT_TYPE_INVALID\"}");
+        int code=g100_ota_handle(method,path,(const uint8_t *)body,body_bytes,ota_result,sizeof(ota_result));
+        char signature[65], extra[96]="";
+        if(!strcmp(method,"POST") && g100_auth_response(ota_result,signature))
+            (void)snprintf(extra,sizeof(extra),"X-G100-MAC: %s\r\n",signature);
+        return send_response_ex(pcb,c,status_text(code),ota_result,extra,
+                                code>=400 ? "application/problem+json":"application/json");
+    }
+#endif
+    if(body_bytes>RJ_BODY_MAX || memchr(body,0,body_bytes))
+        return send_response(pcb,c,"400 Bad Request","{\"error\":\"INVALID_TEXT_BODY\"}");
     if (!strncmp(path, "/api/v1", 7) && (path[7] == '/' || path[7] == 0 || path[7] == '?')) {
         static char result[RJ_RESPONSE_MAX];
         char extra[512], match[129], none[129], idem[65], content_type[80], local[16];
@@ -422,9 +453,6 @@ static err_t receive_request(void *arg, struct tcp_pcb *pcb, struct pbuf *packet
     pbuf_free(packet);
     if (copy < received)
         return send_response(pcb, c, "413 Payload Too Large", "{\"code\":\"REQUEST_TOO_LARGE\"}");
-    if (memchr(c->request, '\0', c->used))
-        return send_response(pcb, c, "400 Bad Request",
-                             "{\"ok\":false,\"error\":\"invalid NUL byte\"}");
     char *end = strstr(c->request, "\r\n\r\n");
     if (!end) {
         if (c->used >= 2048)
@@ -432,6 +460,8 @@ static err_t receive_request(void *arg, struct tcp_pcb *pcb, struct pbuf *packet
                                  "{\"ok\":false,\"error\":\"headers too large\"}");
         return ERR_OK;
     }
+    if(memchr(c->request,0,(size_t)(end-c->request)))
+        return send_response(pcb,c,"400 Bad Request","{\"error\":\"INVALID_HEADER\"}");
     unsigned length;
     int framing = body_length(c->request, end, &length);
     unsigned header_size = (unsigned)(end + 4 - c->request);
@@ -449,7 +479,7 @@ static err_t receive_request(void *arg, struct tcp_pcb *pcb, struct pbuf *packet
     if (c->used > required)
         return send_response(pcb, c, "400 Bad Request", "{\"code\":\"EXTRA_REQUEST_BYTES\"}");
     c->request[required] = '\0';
-    return handle_request(pcb, c, end + 4);
+    return handle_request(pcb, c, end + 4, length);
 }
 static err_t accept_connection(void *arg, struct tcp_pcb *pcb, err_t error) {
     (void)arg;

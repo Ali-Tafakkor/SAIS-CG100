@@ -8,10 +8,15 @@ int g100_qspi_init(uint32_t *jedec);
 int g100_qspi_map(void);
 int g100_qspi_sector_erase(uint32_t offset);
 int g100_qspi_program(uint32_t offset, const void *data, uint32_t bytes);
+/* Application updater: A/B image regions only; never metadata or factory. */
+int g100_qspi_image_sector_erase(uint32_t offset);
+int g100_qspi_image_program(uint32_t offset, const void *data, uint32_t bytes);
 void g100_mpu_boot(void);
 void g100_mpu_application(void);
 void g100_sdram_init(void);
 uint32_t g100_sdram_test(void);
 void g100_watchdog_start(void);
 void g100_watchdog_feed(void);
+int g100_qspi_config_sector_erase(uint32_t off);
+int g100_qspi_config_program(uint32_t off,const void *data,uint32_t bytes);
 #endif

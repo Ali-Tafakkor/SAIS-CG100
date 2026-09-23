@@ -4,6 +4,7 @@
 #include "stm32h750xx.h"
 #include "board_memory.h"
 #include "boot_format.h"
+#include "config_store.h"
 #define HZ 400000000u
 #ifdef G100_SHADOW
 #define MPU_CODE __attribute__((section(".itcm_text"),noinline))
@@ -113,20 +114,50 @@ static int writable_metadata_range(uint32_t off, uint32_t size) {
     return size && ((off >= G100_META0_OFFSET && off+size <= G100_META0_OFFSET+4096u) ||
                     (off >= G100_META1_OFFSET && off+size <= G100_META1_OFFSET+4096u));
 }
-int g100_qspi_sector_erase(uint32_t off) {
-    if ((off & 4095u) || !writable_metadata_range(off,4096)) return 0;
+static int writable_image_range(uint32_t off, uint32_t size) {
+    return size && ((off >= G100_SLOT_A_OFFSET && off < G100_SLOT_A_OFFSET+G100_IMAGE_SLOT_BYTES &&
+                     size <= G100_SLOT_A_OFFSET+G100_IMAGE_SLOT_BYTES-off) ||
+                    (off >= G100_SLOT_B_OFFSET && off < G100_SLOT_B_OFFSET+G100_IMAGE_SLOT_BYTES &&
+                     size <= G100_SLOT_B_OFFSET+G100_IMAGE_SLOT_BYTES-off));
+}
+static int erase_sector(uint32_t off) {
     int ok = nor_ready(HZ*2u) && command(0x06,0,0,0,0,0) &&
              command(0x20,off,1,0,0,0) && nor_ready(HZ*2u);
     int mapped = g100_qspi_map();
     return ok && mapped;
 }
-int g100_qspi_program(uint32_t off, const void *data, uint32_t bytes) {
-    if (!data || bytes > 256u || ((off & 255u)+bytes > 256u) ||
-        !writable_metadata_range(off,bytes)) return 0;
+int g100_qspi_sector_erase(uint32_t off) {
+    return !(off & 4095u) && writable_metadata_range(off,4096) && erase_sector(off);
+}
+int g100_qspi_image_sector_erase(uint32_t off) {
+    return !(off & 4095u) && writable_image_range(off,4096) && erase_sector(off);
+}
+static int program_page(uint32_t off, const void *data, uint32_t bytes) {
     int ok = nor_ready(HZ) && command(0x06,0,0,0,0,0) &&
              command(0x02,off,1,(uint8_t *)data,bytes,0) && nor_ready(HZ);
     int mapped = g100_qspi_map();
     return ok && mapped;
+}
+int g100_qspi_program(uint32_t off, const void *data, uint32_t bytes) {
+    return data && bytes && bytes <= 256u && (off & 255u)+bytes <= 256u &&
+           writable_metadata_range(off,bytes) && program_page(off,data,bytes);
+}
+int g100_qspi_image_program(uint32_t off, const void *data, uint32_t bytes) {
+    return data && bytes && bytes <= 256u && (off & 255u)+bytes <= 256u &&
+           writable_image_range(off,bytes) && program_page(off,data,bytes);
+}
+static int config_range(uint32_t off,uint32_t bytes) {
+    return bytes && ((off>=G100_CONFIG0_OFFSET && off<G100_CONFIG0_OFFSET+G100_CONFIG_BANK_BYTES &&
+                     bytes<=G100_CONFIG0_OFFSET+G100_CONFIG_BANK_BYTES-off) ||
+                    (off>=G100_CONFIG1_OFFSET && off<G100_CONFIG1_OFFSET+G100_CONFIG_BANK_BYTES &&
+                     bytes<=G100_CONFIG1_OFFSET+G100_CONFIG_BANK_BYTES-off));
+}
+int g100_qspi_config_sector_erase(uint32_t off) {
+    return !(off&4095u) && config_range(off,4096) && erase_sector(off);
+}
+int g100_qspi_config_program(uint32_t off,const void *data,uint32_t bytes) {
+    return data && bytes && bytes<=256u && (off&255u)+bytes<=256u &&
+           config_range(off,bytes) && program_page(off,data,bytes);
 }
 static inline __attribute__((always_inline)) void region(unsigned n, uint32_t base, unsigned size_log2, uint32_t attributes) {
     MPU->RNR=n; MPU->RBAR=base; MPU->RASR=attributes | ((size_log2-1u)<<1) | 1u;
@@ -199,6 +230,7 @@ uint32_t g100_sdram_test(void) {
 }
 void g100_watchdog_feed(void) { IWDG1->KR=0xAAAAu; }
 void g100_watchdog_start(void) {
+    DBGMCU->APB4FZ1 &= ~DBGMCU_APB4FZ1_DBG_IWDG1;
     IWDG1->KR=0xCCCCu; IWDG1->KR=0x5555u;
     IWDG1->PR=6; IWDG1->RLR=4095;
     /* ~32 seconds at nominal LSI. Reset recovery never depends on a network peer. */

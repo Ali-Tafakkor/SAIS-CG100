@@ -5,4 +5,5 @@
 void g100_architecture_init(void);
 void g100_architecture_process(uint32_t now);
 int g100_architecture_json(char *out,size_t cap);
+int g100_architecture_ready(void);
 #endif

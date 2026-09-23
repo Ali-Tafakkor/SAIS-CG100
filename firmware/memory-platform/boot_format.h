@@ -59,4 +59,5 @@ int g100_image_validate(uint32_t slot, G100ImageHeader *out);
 int g100_meta_read(G100BootMeta *out);
 int g100_meta_write(G100BootMeta *meta);
 int g100_boot_confirm(void);
+uint32_t g100_select_application(G100ImageHeader *image);
 #endif
