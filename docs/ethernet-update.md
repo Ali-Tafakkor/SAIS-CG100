@@ -65,6 +65,11 @@ Settings and protocol instances are committed to an alternate NOR record with CR
 
 ## Required physical acceptance
 
+This is a reference checklist for future qualification, not a pending task list.
+The current milestone is complete within the scope recorded below. In particular,
+the operator declined a further SWD/Ethernet speed comparison; see the
+[continuation handoff](continuation.md) before starting additional hardware work.
+
 Use an expendable board and preserve its verified backup. See the [qualification record](qualification.md) for completed checks and remaining hardware coverage.
 
 1. Install the prepared bootstrap using the new installer; verify no A/B payload is written through SWD on this route.

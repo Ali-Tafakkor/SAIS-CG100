@@ -33,6 +33,8 @@ Both initial installation routes passed on one board. Ethernet testing with SWD 
 
 ## Source map
 
+For a new development session, start with the [continuation handoff](docs/continuation.md).
+
 - `installer/`: UI, SWD provisioning, authenticated Ethernet client, credentials, fleet worker and tests.
 - `SetAPIs_Calling/firmware/app/`: application, recovery API, update service and authentication.
 - `firmware/bootloader/`: small internal Stage 0.

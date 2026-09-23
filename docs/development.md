@@ -1,5 +1,8 @@
 # Development and releases
 
+Start with the [2026-09-23 continuation handoff](continuation.md) for the completed
+release, operator decisions and remaining qualification boundaries.
+
 `installer/` uses only the Python standard library. The operator ZIP includes Python 3.13.14 and xPack OpenOCD 0.12.0-7. Its local browser UI binds only to `127.0.0.1`; state-changing requests require a per-process token. The firmware downloader retrieves the latest GitHub release manifest and binaries via HTTPS, checks SHA-256 and lengths, then validates the SDRAM image ABI.
 
 ## Firmware build

@@ -25,6 +25,11 @@ Choose **Install everything with SWD** when desired. This installs the same netw
 
 ## Later installation or update
 
+After successful initial preparation, independent power and Ethernet are sufficient
+for application updates. Keep the enrolled Windows account or import the saved
+board access file on another computer. Updating Stage 0 or the independent recovery
+image is outside this route and still requires a separate SWD service operation.
+
 Choose **Install or update over Ethernet**. Discover boards, or enter a known IPv4 address when broadcast discovery cannot cross your router/VPN. Select registered boards, load firmware and confirm `UPDATE <count>`. This mode does not enumerate ST-LINK probes or execute OpenOCD.
 
 Authenticated updates and their dedicated discovery query do not require the controller's address to appear in the legacy source-IP allow-list. Existing non-update management APIs retain that list. The full SWD route also uses authenticated update status for its final runtime checks.
